@@ -1,0 +1,219 @@
+,Labels
+0,Adipose_Subcutaneous
+1,Adipose_Visceral_Omentum
+2,Adrenal_Gland
+3,Artery_Aorta
+4,Artery_Coronary
+5,Artery_Tibial
+6,Bladder
+7,Brain_Amygdala
+8,Brain_Anterior_cingulate_cortex_BA24
+9,Brain_Caudate_basal_ganglia
+10,Brain_Cerebellar_Hemisphere
+11,Brain_Cerebellum
+12,Brain_Cortex
+13,Brain_Frontal_Cortex_BA9
+14,Brain_Hippocampus
+15,Brain_Hypothalamus
+16,Brain_Nucleus_accumbens_basal_ganglia
+17,Brain_Putamen_basal_ganglia
+18,Brain_Spinal_cord_cervical_c1
+19,Brain_Substantia_nigra
+20,Breast_Mammary_Tissue
+21,Cells_EBV-transformed_lymphocytes
+22,Cells_Transformed_fibroblasts
+23,Cervix_Ectocervix
+24,Cervix_Endocervix
+25,Colon_Sigmoid
+26,Colon_Transverse
+27,Esophagus_Gastroesophageal_Junction
+28,Esophagus_Mucosa
+29,Esophagus_Muscularis
+30,Fallopian_Tube
+31,Heart_Atrial_Appendage
+32,Heart_Left_Ventricle
+33,Kidney_Cortex
+34,Liver
+35,Lung
+36,Minor_Salivary_Gland
+37,Muscle_Skeletal
+38,Nerve_Tibial
+39,Ovary
+40,Pancreas
+41,Pituitary
+42,Prostate
+43,Skin_Not_Sun_Exposed_Suprapubic
+44,Skin_Sun_Exposed_Lower_leg
+45,Small_Intestine_Terminal_Ileum
+46,Spleen
+47,Stomach
+48,Testis
+49,Thyroid
+50,Uterus
+51,Vagina
+52,Whole_Blood
+53,cardiac ventricle fibroblast
+54,hair follicular keratinocyte
+55,airway epithelial cell
+56,epithelial cell of proximal tubule
+57,pericardium fibroblast
+58,mesangial cell
+59,bronchial fibroblast
+60,glomerular endothelial cell
+61,kidney epithelial cell
+62,mammary microvascular endothelial cell
+63,epithelial cell of alveolus of lung
+64,myometrial cell
+65,cardiac atrium fibroblast
+66,endometrial microvascular endothelial cell
+67,smooth muscle cell
+68,hepatocyte
+69,neural progenitor cell
+70,HT1080
+71,SK-N-DZ
+72,SK-MEL-5
+73,NCI-H460
+74,astrocyte
+75,LHCN-M2
+76,K562
+77,HepG2
+78,MCF-7
+79,bipolar spindle neuron
+80,skeletal muscle myoblast
+81,myotube
+82,H7-hESC
+83,RPMI-7951
+84,M059J
+85,H4
+86,MG63
+87,G401
+88,Caki2
+89,SJSA1
+90,Daoy
+91,A172
+92,induced pluripotent stem cell
+93,fibroblast of arm
+94,A375
+95,HT-29
+96,PC-3
+97,Karpas-422
+98,Oci-Ly-7
+99,SJCRH30
+100,neural cell
+101,umbilical cord
+102,pericyte cell
+103,melanocyte of skin
+104,placental epithelial cell
+105,hair follicle dermal papilla cell
+106,hematopoietic multipotent progenitor cell
+107,vein endothelial cell
+108,osteoblast
+109,articular chondrocyte of knee joint
+110,thoracic aorta endothelial cell
+111,fibroblast of the aortic adventitia
+112,skeletal muscle satellite cell
+113,fibroblast of dermis
+114,mammary epithelial cell
+115,subcutaneous preadipocyte
+116,fibroblast of villous mesenchyme
+117,endothelial cell of umbilical vein
+118,fibroblast of lung
+119,keratinocyte
+120,stomach
+121,dermis microvascular lymphatic vessel endothelial cell
+122,tongue
+123,lung microvascular endothelial cell
+124,liver
+125,smooth muscle cell of the coronary artery
+126,aortic smooth muscle cell
+127,cerebellum
+128,occipital lobe
+129,lung
+130,metanephros
+131,bronchial smooth muscle cell
+132,spinal cord
+133,parietal lobe
+134,diencephalon
+135,bronchial epithelial cell
+136,human nasal epithelial cells
+137,pulmonary artery endothelial cell
+138,regular cardiac myocyte
+139,endothelial cell of coronary artery
+140,skeletal muscle tissue
+141,skin of body
+142,frontal cortex
+143,camera-type eye
+144,dermis lymphatic vessel endothelial cell
+145,smooth muscle cell of the umbilical artery
+146,tracheal epithelial cell
+147,smooth muscle cell of trachea
+148,renal cortical epithelial cell
+149,dermis blood vessel endothelial cell
+150,heart
+151,thyroid gland
+152,urinary bladder
+153,temporal lobe
+154,uterine smooth muscle cell
+155,epithelial cell of umbilical artery
+156,smooth muscle cell of the pulmonary artery
+157,smooth muscle cell of bladder
+158,bladder microvascular endothelial cell
+159,uterus
+160,GM12878
+161,Universal_Human_Reference
+162,H1_Cell_Line
+163,H1_BMP4_Derived_Mesendoderm_Cultured_Cells
+164,H1_BMP4_Derived_Trophoblast_Cultured_Cells
+165,H1_Derived_Mesenchymal_Stem_Cells
+166,H1_Derived_Neuronal_Progenitor_Cultured_Cells
+167,hESC_Derived_CD184+_Endoderm_Cultured_Cells
+168,hESC_Derived_CD56+_Ectoderm_Cultured_Cells
+169,hESC_Derived_CD56+_Mesoderm_Cultured_Cells
+170,HUES64_Cell_Line
+171,4star
+172,Breast_Myoepithelial_Cells
+173,Breast_vHMEC
+174,CD4_Memory_Primary_Cells
+175,CD4_Naive_Primary_Cells
+176,CD8_Naive_Primary_Cells
+177,Mobilized_CD34_Primary_Cells_Female
+178,Neurosphere_Cultured_Cells_Cortex_Derived
+179,Neurosphere_Cultured_Cells_Ganglionic_Eminence_Derived
+180,Penis_Foreskin_Fibroblast_Primary_Cells_skin01
+181,Penis_Foreskin_Fibroblast_Primary_Cells_skin02
+182,Penis_Foreskin_Keratinocyte_Primary_Cells_skin02
+183,Penis_Foreskin_Keratinocyte_Primary_Cells_skin03
+184,Penis_Foreskin_Melanocyte_Primary_Cells_skin01
+185,Penis_Foreskin_Melanocyte_Primary_Cells_skin03
+186,Peripheral_Blood_Mononuclear_Primary_Cells
+187,Aorta
+188,Adult_Liver
+189,Brain_Germinal_Matrix
+190,Brain_Hippocampus_Middle
+191,Esophagus
+192,Fetal_Brain_Female
+193,Fetal_Intestine_Large
+194,Fetal_Intestine_Small
+195,Pancreatic_Islets
+196,Gastric
+197,Left_Ventricle
+198,Lung.1
+199,Ovary.1
+200,Pancreas.1
+201,Psoas_Muscle
+202,Right_Atrium
+203,Right_Ventricle
+204,Sigmoid_Colon
+205,Small_Intestine
+206,Thymus
+207,Spleen.1
+208,A549
+209,GM12878.1
+210,HELA
+211,HEPG2
+212,HMEC
+213,HSMM
+214,HUVEC
+215,K562.1
+216,NHEK
+217,NHLF
