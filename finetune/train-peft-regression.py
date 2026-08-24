@@ -49,9 +49,9 @@ class ModelArguments:
     adalora_dropout: float = field(default=0.05, metadata={"help": "dropout rate for AdaLoRA"})
     adalora_target_modules: str = field(default="Wqkv,wo", metadata={"help": "modules to apply AdaLoRA"})
 
-    total_step: int = field(default=160000, metadata={"help": "total training steps"})
-    tinit: int = field(default=16000, metadata={"help": "warmup steps before rank adaptation starts"})
-    tfinal: int = field(default=140000, metadata={"help": "end step of adaptation"})
+    total_step: int = field(default=60000, metadata={"help": "total training steps"})
+    tinit: int = field(default=4000, metadata={"help": "warmup steps before rank adaptation starts"})
+    tfinal: int = field(default=8000, metadata={"help": "end step of adaptation"})
     deltaT: int = field(default=1000, metadata={"help": "frequency of rank updates"})
     beta1: float = field(default=0.85, metadata={"help": "beta1 for adaptive rank"})
     beta2: float = field(default=0.85, metadata={"help": "beta2 for adaptive rank"})

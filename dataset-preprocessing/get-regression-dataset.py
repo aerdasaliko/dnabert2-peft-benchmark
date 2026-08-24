@@ -20,7 +20,6 @@ dataset = load_dataset(
 )
 
 # Split train into train + validation
-# Split train into train + validation based on chromosomes
 train_df_full = dataset["train"].to_pandas()
 
 val_mask = train_df_full["chromosome"].isin(["7"])
