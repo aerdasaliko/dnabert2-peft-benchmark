@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# =========================
-# User config
-# =========================
 METHODS=("none" "lora" "qlora" "adalora")
-# METHODS=("qlora")
 
 # Resolve absolute paths from this script's location
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,20 +9,22 @@ FINETUNE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${FINETUNE_DIR}/../.." && pwd)"
 
 TRAIN_SCRIPT="${FINETUNE_DIR}/train-peft-regression.py"
-MODEL_PATH="${REPO_ROOT}/DNABERT-2-117M-adapted"
+MODEL_PATH="${REPO_ROOT}/DNABERT-2-117M-updated"
 LOG_DIR="${REPO_ROOT}/logs"
-OUT_ROOT="${FINETUNE_DIR}/output/peft_bench"
+OUT_ROOT="${FINETUNE_DIR}/output/peft_bench_updated"
 DATASETS=(
+    # "${REPO_ROOT}/datasets/data/classification/fto-binding-sites"
+    # "${REPO_ROOT}/datasets/data/classification/fus-binding-sites"
+    # "${REPO_ROOT}/datasets/data/classification/stau2-binding-sites"
+    # "${REPO_ROOT}/datasets/data/classification/trove2-binding-sites"
+    # "${REPO_ROOT}/datasets/data/classification/xrn2-binding-sites"
     "${REPO_ROOT}/datasets/data/regression/hepg2_log2fc"
     "${REPO_ROOT}/datasets/data/regression/k562_log2fc"
     "${REPO_ROOT}/datasets/data/regression/sknsh_log2fc"
-    # "${REPO_ROOT}/datasets/data/regression/rna_expr_brain_hippocampus"
-    # "${REPO_ROOT}/datasets/data/regression/rna_expr_liver"
-    # "${REPO_ROOT}/datasets/data/regression/rna_expr_cells_transformed_fibroblasts"
 )
 
-# Training params
-MODEL_MAX_LENGTH=128
+# Training params: Regression
+MODEL_MAX_LENGTH=256
 BATCH_TRAIN=32
 BATCH_EVAL=64
 GRAD_ACC=1
@@ -34,10 +32,11 @@ LR=2e-5
 EPOCHS=3
 SAVE_STEPS=2000
 EVAL_STEPS=2000
-LOGGING_STEPS=100
+LOGGING_STEPS=200
 WARMUP_STEPS=2000
 
-# MODEL_MAX_LENGTH=100
+# Training params: Classification
+# MODEL_MAX_LENGTH=128
 # BATCH_TRAIN=16
 # BATCH_EVAL=32
 # GRAD_ACC=1
@@ -48,12 +47,8 @@ WARMUP_STEPS=2000
 # WARMUP_STEPS=50
 # LOGGING_STEPS=100
 
-# Optional offline mode
-# export TRANSFORMERS_OFFLINE=1
-
 mkdir -p "${LOG_DIR}" "${OUT_ROOT}"
 
-# Preflight checks
 [[ -f "${TRAIN_SCRIPT}" ]] || { echo "Missing train script: ${TRAIN_SCRIPT}"; exit 1; }
 [[ -d "${MODEL_PATH}" ]] || { echo "Missing model dir: ${MODEL_PATH}"; exit 1; }
 [[ -f "${MODEL_PATH}/config.json" ]] || { echo "Model config.json not found in ${MODEL_PATH}"; exit 1; }
@@ -88,8 +83,6 @@ for dataset in "${DATASETS[@]}"; do
     TS=$(timestamp)
 
     OUT_DIR="${OUT_ROOT}/${DATA_NAME}/${method}"
-
-    # overwrite behavior handled here instead of passing --overwrite_output_dir
     rm -rf "${OUT_DIR}"
     mkdir -p "${OUT_DIR}"
 
@@ -130,7 +123,6 @@ for dataset in "${DATASETS[@]}"; do
       --warmup_steps "${WARMUP_STEPS}" \
       --logging_steps "${LOGGING_STEPS}" \
       --log_level info \
-      --find_unused_parameters False \
       2>&1 | tee "${TRAIN_LOG}"
     EXIT_CODE=${PIPESTATUS[0]}
     set -e
@@ -160,7 +152,7 @@ for dataset in "${DATASETS[@]}"; do
   done
 done
 
-# Build per-method average time summary
+# Time summary
 python - <<PY
 import csv, statistics
 from collections import defaultdict

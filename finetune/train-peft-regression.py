@@ -2,16 +2,19 @@ import os
 import csv
 import json
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Any, Optional, Dict, Sequence, Tuple, List, Union
 from datetime import datetime
 
 import torch
+import torch.nn as nn
 import transformers
 import sklearn
 import numpy as np
 from torch.utils.data import Dataset
-import matplotlib.pyplot as plt
+from transformers.modeling_outputs import SequenceClassifierOutput
+from transformers import Trainer
 
 from peft import (
     LoraConfig,
@@ -37,14 +40,14 @@ class ModelArguments:
     lora_r: int = field(default=8, metadata={"help": "hidden dimension for LoRA"})
     lora_alpha: int = field(default=32, metadata={"help": "alpha for LoRA"})
     lora_dropout: float = field(default=0.05, metadata={"help": "dropout rate for LoRA"})
-    lora_target_modules: str = field(default="Wqkv", metadata={"help": "where to perform LoRA"})
+    lora_target_modules: str = field(default="Wqkv,wo", metadata={"help": "where to perform LoRA"})
 
     # AdaLoRA args
     adalora_init_r: int = field(default=12, metadata={"help": "initial hidden dimension for AdaLoRA"})
     adalora_target_r: int = field(default=8, metadata={"help": "target hidden dimension for AdaLoRA"})
     adalora_alpha: int = field(default=32, metadata={"help": "alpha for AdaLoRA"})
     adalora_dropout: float = field(default=0.05, metadata={"help": "dropout rate for AdaLoRA"})
-    adalora_target_modules: str = field(default="Wqkv", metadata={"help": "modules to apply AdaLoRA"})
+    adalora_target_modules: str = field(default="Wqkv,wo", metadata={"help": "modules to apply AdaLoRA"})
 
     total_step: int = field(default=160000, metadata={"help": "total training steps"})
     tinit: int = field(default=16000, metadata={"help": "warmup steps before rank adaptation starts"})
@@ -135,6 +138,18 @@ def load_or_generate_kmer(data_path: str, texts: List[str], k: int) -> List[str]
             json.dump(kmer, f)
     return kmer
 
+
+def print_trainable_parameters_verbose(model: torch.nn.Module):
+    total = 0
+    trainable = 0
+    for n, p in model.named_parameters():
+        num = p.numel()
+        total += num
+        if p.requires_grad:
+            trainable += num
+            print(f"TRAINABLE: {n} ({num})")
+    pct = 100 * trainable / total if total > 0 else 0
+    print(f"Trainable params: {trainable} | Total params: {total} | Trainable%: {pct:.4f}")
 
 # -----------------------------
 # Dataset
@@ -236,24 +251,29 @@ def calculate_regression_metrics(predictions: np.ndarray, labels: np.ndarray):
 
     # Correlation metrics
     try:
-        pearson = pearsonr(targets, preds)[0]
+        pearson, pearson_p = pearsonr(targets, preds)
     except Exception:
         pearson = 0.0
+        pearson_p = 1.0
 
     try:
-        spearman = spearmanr(targets, preds)[0]
+        spearman, spearman_p = spearmanr(targets, preds)
     except Exception:
         spearman = 0.0
+        spearman_p = 1.0
 
-    return {
+    results =  {
         "mse": mse,
         "rmse": rmse,
         "mae": mae,
         "mape": mape,
         "r2": r2,
         "pearson": pearson,
+        "pearson_p": pearson_p,
         "spearman": spearman,
+        "spearman_p": spearman_p,
     }
+    return results
 
 
 def preprocess_logits_for_metrics(logits: Union[torch.Tensor, Tuple[torch.Tensor, Any]], _):
@@ -268,54 +288,151 @@ def compute_metrics(eval_pred):
     logits, labels = eval_pred
     predictions = np.squeeze(logits)
     labels = np.squeeze(labels)
-    
-    if np.random.rand() < 0.1:
-        plot_predictions_vs_truth(predictions, labels)
-        plot_label_distribution(labels)
-        plot_residuals(predictions, labels)
-        print("Plotting predictions vs labels...")
 
     return calculate_regression_metrics(predictions, labels)
 
-def plot_predictions_vs_truth(preds, labels):
-    plt.figure(figsize=(6, 6))
-    plt.scatter(labels, preds, alpha=0.3)
+def get_texts(data_path: str):
+    texts = []
+    with open(data_path, "r") as f:
+        reader = csv.reader(f)
+        next(reader, None)
+        for row in reader:
+            texts.append(row[0])
+    return texts
 
-    min_val = min(labels.min(), preds.min())
-    max_val = max(labels.max(), preds.max())
+def dump_test_predictions(trainer: transformers.Trainer, test_dataset: Dataset, sequences: list[str],
+                          output_dir: str, problem_type: str):
+    pred_output = trainer.predict(test_dataset=test_dataset)
+    labels = pred_output.label_ids
+    preds_raw = pred_output.predictions
 
-    plt.plot([min_val, max_val], [min_val, max_val], 'r--')
+    if problem_type == "classification":
+        probs = torch.softmax(torch.tensor(preds_raw), dim=-1).numpy()
+        preds = np.argmax(probs, axis=-1)
+    else:
+        preds = np.squeeze(preds_raw)
 
-    plt.xlabel("True values")
-    plt.ylabel("Predictions")
-    plt.title("Predictions vs Ground Truth")
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    plt.savefig(f"pred-vs-label_{timestamp}.png")
-    plt.close()
+    labels = np.squeeze(labels)
+    preds = np.squeeze(preds)
 
+    pred_path = os.path.join(output_dir, "test_predictions.csv")
+    with open(pred_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["sequence", "label", "prediction"])
+        for seq, y_true, y_pred in zip(sequences, labels.tolist(), preds.tolist()):
+            writer.writerow([seq, y_true, y_pred])
 
-def plot_label_distribution(labels):
-    plt.figure()
-    plt.hist(labels, bins=100)
-    plt.title("Label distribution")
-    plt.savefig(f"label-distribution_{np.random.randint(10000)}.png")
-    plt.close()
+# -----------------------------
+# QLoRA sequence classifier wrapper
+# -----------------------------
+class QLoRASequenceClassifier(nn.Module):
+    """
+    Sequence-classification head similar to BertForSequenceClassification,
+    with quantized backbone loaded via AutoModel.
+    """
+    def __init__(self, bert_backbone: nn.Module, config):
+        super().__init__()
+        self.bert = bert_backbone
+        self.num_labels = config.num_labels
+        self.config = config
 
+        classifier_dropout = (
+            config.classifier_dropout
+            if getattr(config, "classifier_dropout", None) is not None
+            else config.hidden_dropout_prob
+        )
+        self.dropout = nn.Dropout(classifier_dropout)
+        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
-def plot_residuals(preds, labels):
-    residuals = preds - labels
+        for p in self.classifier.parameters():
+            p.requires_grad = False
 
-    plt.figure()
-    plt.scatter(preds, residuals, alpha=0.3)
-    plt.axhline(0, linestyle='--')
+    def forward(
+        self,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        token_type_ids: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+        labels: Optional[torch.Tensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        **kwargs,
+    ) -> Union[Tuple[torch.Tensor], SequenceClassifierOutput]:
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-    plt.xlabel("True values")
-    plt.ylabel("Residuals")
-    plt.title("Residuals vs Prediction")
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    plt.savefig(f"residuals_{timestamp}.png")
-    plt.close()
+        outputs = self.bert(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            inputs_embeds=inputs_embeds,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            **kwargs,
+        )
 
+        pooled_output = outputs[1]
+        pooled_output = self.dropout(pooled_output)
+        logits = self.classifier(pooled_output)
+
+        loss = None
+        if labels is not None:
+            if self.config.problem_type is None:
+                if self.num_labels == 1:
+                    self.config.problem_type = "regression"
+                elif self.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
+                    self.config.problem_type = "single_label_classification"
+                else:
+                    self.config.problem_type = "multi_label_classification"
+
+            if self.config.problem_type == "regression":
+                loss_fct = nn.MSELoss()
+                if self.num_labels == 1:
+                    loss = loss_fct(logits.squeeze(), labels.squeeze())
+                else:
+                    loss = loss_fct(logits, labels)
+            elif self.config.problem_type == "single_label_classification":
+                loss_fct = nn.CrossEntropyLoss()
+                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            elif self.config.problem_type == "multi_label_classification":
+                loss_fct = nn.BCEWithLogitsLoss()
+                loss = loss_fct(logits, labels)
+
+        if not return_dict:
+            output = (logits,)
+            if hasattr(outputs, "hidden_states"):
+                output = output + (outputs.hidden_states,)
+            if hasattr(outputs, "attentions"):
+                output = output + (outputs.attentions,)
+            return ((loss,) + output) if loss is not None else output
+
+        return SequenceClassifierOutput(
+            loss=loss,
+            logits=logits,
+            hidden_states=getattr(outputs, "hidden_states", None),
+            attentions=getattr(outputs, "attentions", None),
+        )
+
+class AdaLoRATrainer(Trainer):
+    def training_step(self, model, inputs, num_items_in_batch=None):
+        loss = super().training_step(model, inputs, num_items_in_batch=num_items_in_batch)
+
+        adalora_cfg = getattr(self, "adalora_cfg", None)
+        if adalora_cfg is None:
+            return loss
+
+        base_model = getattr(model, "module", model)
+        base_model = getattr(base_model, "base_model", base_model)
+
+        if not hasattr(base_model, "update_and_allocate"):
+            return loss
+
+        if any(p.requires_grad and p.grad is not None for p in base_model.parameters()):
+            base_model.update_and_allocate(self.state.global_step)
+
+        return loss
 
 # -----------------------------
 # Train
@@ -337,9 +454,6 @@ def train():
         trust_remote_code=True,
     )
 
-    if "InstaDeepAI" in model_args.model_name_or_path:
-        tokenizer.eos_token = tokenizer.pad_token
-
     train_dataset = SupervisedDataset(
         tokenizer=tokenizer,
         data_path=os.path.join(data_args.data_path, "train.csv"),
@@ -357,67 +471,58 @@ def train():
     )
     data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
 
-    config = transformers.AutoConfig.from_pretrained(
-        model_args.model_name_or_path,
-        cache_dir=training_args.cache_dir,
-        trust_remote_code=True,
-    )
-    config.pad_token_id = tokenizer.pad_token_id
-    config.num_labels = 1
-    config.problem_type = "regression"
-
     # Load model differently for qlora
     if peft_method == "qlora":
+        # Base config
+        config = transformers.AutoConfig.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            trust_remote_code=True,
+        )
+        config.pad_token_id = tokenizer.pad_token_id
+        config.num_labels = train_dataset.num_labels
+        config.problem_type = None
+
+        # 4-bit quantized backbone
         bnb_config = transformers.BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_use_double_quant=True,
             bnb_4bit_compute_dtype=torch.bfloat16,
         )
-        model = transformers.AutoModelForSequenceClassification.from_pretrained(
+
+        backbone = transformers.AutoModel.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
             config=config,
             trust_remote_code=True,
             quantization_config=bnb_config,
+            attn_implementation="flash_attention_2"
         )
-        model.config.use_cache = False
-        # !!!!!!!!!!!!!!!!!!!!!!!!!!
-        model = prepare_model_for_kbit_training(
-            model,
+
+        backbone = prepare_model_for_kbit_training(
+            backbone,
             use_gradient_checkpointing=False
         )
-        
-        if hasattr(model, "bert") and hasattr(model.bert, "pooler"):
-            old_dense = model.bert.pooler.dense
 
-            new_dense = torch.nn.Linear(
-                old_dense.in_features,
-                old_dense.out_features,
-                bias=True
-            )
-
-            new_dense.weight.data = old_dense.weight.data.float()
-            new_dense.bias.data = old_dense.bias.data.float()
-
-            model.bert.pooler.dense = new_dense.to("cuda")
-            
-        if hasattr(model, "classifier"):
-            old = model.classifier
-            new = torch.nn.Linear(old.in_features, old.out_features, bias=True)
-            new.weight.data = old.weight.data.float()
-            new.bias.data = old.bias.data.float()
-            model.classifier = new.to("cuda")
-        # !!!!!!!!!!!!!!!!!!!!!!!!!!!!11
+        model = QLoRASequenceClassifier(backbone, config)
     else:
+        config = transformers.AutoConfig.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            trust_remote_code=True,
+        )
+        config.pad_token_id = tokenizer.pad_token_id
+        config.num_labels = train_dataset.num_labels
+        config.problem_type = None
+
         model = transformers.AutoModelForSequenceClassification.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
             config=config,
             trust_remote_code=True,
+            attn_implementation="flash_attention_2"
         )
-
-    model.config.pad_token_id = tokenizer.pad_token_id
 
     # Apply PEFT
     if peft_method in {"lora", "qlora"}:
@@ -432,17 +537,27 @@ def train():
         )
         model = get_peft_model(model, lora_config)
         model.print_trainable_parameters()
+        print_trainable_parameters_verbose(model)
 
     elif peft_method == "adalora":
+        steps_per_epoch = math.ceil(
+            len(train_dataset)
+            / (
+                training_args.per_device_train_batch_size
+                * training_args.gradient_accumulation_steps
+            )
+        )
+        total_step = steps_per_epoch * training_args.num_train_epochs
+
         adalora_config = AdaLoraConfig(
             init_r=model_args.adalora_init_r,
             target_r=model_args.adalora_target_r,
             lora_alpha=model_args.adalora_alpha,
             target_modules=list(model_args.adalora_target_modules.split(",")),
             lora_dropout=model_args.adalora_dropout,
-            total_step=model_args.total_step,
-            tinit=model_args.tinit,
-            tfinal=model_args.tfinal,
+            total_step=total_step,
+            tinit=int(total_step * 0.07),
+            tfinal=int(total_step * 0.15),
             deltaT=model_args.deltaT,
             beta1=model_args.beta1,
             beta2=model_args.beta2,
@@ -453,8 +568,10 @@ def train():
         )
         model = get_peft_model(model, adalora_config)
         model.print_trainable_parameters()
+        print_trainable_parameters_verbose(model)
 
-    trainer = transformers.Trainer(
+    trainer_cls = AdaLoRATrainer if peft_method == "adalora" else transformers.Trainer
+    trainer = trainer_cls(
         model=model,
         args=training_args,
         preprocess_logits_for_metrics=preprocess_logits_for_metrics,
@@ -463,6 +580,9 @@ def train():
         eval_dataset=val_dataset,
         data_collator=data_collator,
     )
+        
+    if peft_method == "adalora":
+        trainer.adalora_cfg = adalora_config
 
     trainer.train()
 
@@ -476,6 +596,15 @@ def train():
         os.makedirs(results_path, exist_ok=True)
         with open(os.path.join(results_path, "eval_results.json"), "w") as f:
             json.dump(results, f)
+    
+    texts = get_texts(data_path=os.path.join(data_args.data_path, "test.csv"))        
+    dump_test_predictions(
+        trainer=trainer,
+        test_dataset=test_dataset,
+        sequences=texts,
+        output_dir=training_args.output_dir,
+        problem_type="regression",
+    )
 
 
 if __name__ == "__main__":

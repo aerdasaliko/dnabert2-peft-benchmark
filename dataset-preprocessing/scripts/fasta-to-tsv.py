@@ -5,7 +5,6 @@ def fasta_to_tsv(fasta_file, label, output_file):
     """
     Converts a FASTA file to a TSV file with sequence and label columns.
     Only includes sequences in the sense (+) direction.
-    Replaces 'U' with 'T' in the sequences.
     """
     with open(fasta_file, 'r') as f, open(output_file, 'w', newline='') as out_file:
         writer = csv.writer(out_file, delimiter='\t')

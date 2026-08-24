@@ -4,7 +4,6 @@ import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional, Dict, Sequence, Tuple, List, Union
-import shutil
 
 import torch
 import transformers
@@ -39,14 +38,14 @@ class ModelArguments:
     lora_r: int = field(default=8, metadata={"help": "hidden dimension for LoRA"})
     lora_alpha: int = field(default=32, metadata={"help": "alpha for LoRA"})
     lora_dropout: float = field(default=0.05, metadata={"help": "dropout rate for LoRA"})
-    lora_target_modules: str = field(default="Wqkv", metadata={"help": "where to perform LoRA"})
+    lora_target_modules: str = field(default="Wqkv,wo", metadata={"help": "where to perform LoRA"})
 
 
 @dataclass
 class DataArguments:
-    train_file: str = field(default=None, metadata={"help": "Path to train CSV"})
-    eval_file: str = field(default=None, metadata={"help": "Path to eval/dev CSV"})
-    test_file: str = field(default=None, metadata={"help": "Path to test CSV"})
+    train_file: str = field(default=None, metadata={"help": "Path to train data"})
+    eval_file: str = field(default=None, metadata={"help": "Path to eval/dev data"})
+    test_file: str = field(default=None, metadata={"help": "Path to test data"})
 
 
 @dataclass
@@ -78,19 +77,6 @@ class TrainingArguments(transformers.TrainingArguments):
     save_model: bool = field(default=False)
     seed: int = field(default=42)
 
-
-# -----------------------------
-# Utils
-# -----------------------------
-def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
-    """Collects the state dict and dump to disk."""
-    state_dict = trainer.model.state_dict()
-    if trainer.args.should_save:
-        cpu_state_dict = {key: value.cpu() for key, value in state_dict.items()}
-        del state_dict
-        trainer._save(output_dir, state_dict=cpu_state_dict)
-
-
 # -----------------------------
 # Dataset
 # -----------------------------
@@ -107,13 +93,12 @@ class SupervisedDataset(Dataset):
         super(SupervisedDataset, self).__init__()
 
         with open(data_path, "r") as f:
-            data = list(csv.reader(f))[1:]  # skip header
+            data = list(csv.reader(f, delimiter="\t"))[1:]  # skip header
 
         if len(data[0]) == 2:
             # data is in the format of [text, label]
             logging.warning("Perform single sequence task...")
             texts = [d[0] for d in data]
-            self.texts = texts
             labels = [int(d[1]) for d in data] if problem_type == "classification" else [float(d[1]) for d in data]
         else:
             raise ValueError("Data format not supported.")
@@ -192,14 +177,16 @@ def calculate_regression_metrics(predictions: np.ndarray, labels: np.ndarray):
     r2 = sklearn.metrics.r2_score(targets, preds)
 
     try:
-        pearson = pearsonr(targets, preds)[0]
+        pearson, pearson_p = pearsonr(targets, preds)
     except Exception:
         pearson = 0.0
+        pearson_p = 1.0
 
     try:
-        spearman = spearmanr(targets, preds)[0]
+        spearman, spearman_p = spearmanr(targets, preds)
     except Exception:
         spearman = 0.0
+        spearman_p = 1.0
 
     results =  {
         "mse": mse,
@@ -208,7 +195,9 @@ def calculate_regression_metrics(predictions: np.ndarray, labels: np.ndarray):
         "mape": mape,
         "r2": r2,
         "pearson": pearson,
+        "pearson_p": pearson_p,
         "spearman": spearman,
+        "spearman_p": spearman_p,
     }
     return results
 
@@ -241,8 +230,7 @@ def make_compute_metrics(problem_type: str):
             valid_mask = labels != -100
             valid_labels = labels[valid_mask]
 
-            # Only compute binary AUCs when applicable
-            if probs.shape[-1] == 2 and len(np.unique(valid_labels)) > 1:
+            if probs.shape[-1] == 2 and len(np.unique(valid_labels)) > 1: # for binary classification
                 results["roc_auc"] = sklearn.metrics.roc_auc_score(valid_labels, probs[valid_mask, 1])
                 results["pr_auc"] = sklearn.metrics.average_precision_score(valid_labels, probs[valid_mask, 1])
             return results
@@ -255,7 +243,17 @@ def make_compute_metrics(problem_type: str):
 # -----------------------------
 # Prediction dump
 # -----------------------------
-def dump_test_predictions(trainer: transformers.Trainer, test_dataset: Dataset, output_dir: str, problem_type: str):
+def get_texts(data_path: str):
+    texts = []
+    with open(data_path, "r") as f:
+        reader = csv.reader(f)
+        next(reader, None)
+        for row in reader:
+            texts.append(row[0])
+    return texts
+
+def dump_test_predictions(trainer: transformers.Trainer, test_dataset: Dataset, sequences: list[str],
+                          output_dir: str, problem_type: str):
     pred_output = trainer.predict(test_dataset=test_dataset)
     labels = pred_output.label_ids
     preds_raw = pred_output.predictions
@@ -268,9 +266,6 @@ def dump_test_predictions(trainer: transformers.Trainer, test_dataset: Dataset, 
 
     labels = np.squeeze(labels)
     preds = np.squeeze(preds)
-
-    # Add this line (requires test_dataset.texts to exist)
-    sequences = test_dataset.texts
 
     pred_path = os.path.join(output_dir, "test_predictions.csv")
     with open(pred_path, "w", newline="") as f:
@@ -303,9 +298,6 @@ def train():
         use_fast=True,
         trust_remote_code=True,
     )
-
-    if "InstaDeepAI" in model_args.model_name_or_path:
-        tokenizer.eos_token = tokenizer.pad_token
 
     train_dataset = SupervisedDataset(
         tokenizer=tokenizer,
@@ -383,22 +375,22 @@ def train():
         else:
             trainer.save_model(model_dir)
 
-        trainer.save_state()
-        
-        zip_base = os.path.join(training_args.output_dir, "model")
-        shutil.make_archive(zip_base, "zip", model_dir)
+    # ii) save trainer state
+    trainer.save_state()
 
-    # ii) output test evaluation metrics
+    # iii) output test evaluation metrics
     if training_args.eval_and_save_results:
         test_metrics = trainer.evaluate(eval_dataset=test_dataset)
         metrics_path = os.path.join(training_args.output_dir, "evaluation.json")
         with open(metrics_path, "w") as f:
             json.dump(test_metrics, f, indent=2)
 
-    # iii) output test labels and predictions
+    # iv) output test labels and predictions
+    texts = get_texts(data_path=data_args.test_file)  
     dump_test_predictions(
         trainer=trainer,
         test_dataset=test_dataset,
+        sequences=texts,
         output_dir=training_args.output_dir,
         problem_type=problem_type,
     )

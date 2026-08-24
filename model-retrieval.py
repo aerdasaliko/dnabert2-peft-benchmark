@@ -15,25 +15,14 @@ def main():
     )
 
     args = parser.parse_args()
-    repo_id = "zhihan1996/DNABERT-2-117M"
+    repo_id_dnabert2 = "Taykhoom/DNABERT2"
 
-    print(f"Downloading {repo_id}")
+    print(f"Downloading {repo_id_dnabert2}")
     print(f"Saving to {args.output}")
 
     snapshot_download(
-        repo_id=repo_id,
+        repo_id=repo_id_dnabert2,
         local_dir=args.output,
-        local_dir_use_symlinks=False,
-        allow_patterns=[
-            "bert_layers.py",
-            "bert_padding.py",
-            "config.json",
-            "generation_config.json",
-            "pytorch_model.bin",
-            "tokenizer.json",
-            "tokenizer_config.json",
-            "configuration_bert.py",
-        ],
     )
 
     print("Download complete.")
